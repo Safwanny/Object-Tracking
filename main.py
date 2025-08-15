@@ -1,68 +1,127 @@
-from ultralytics import YOLO
+import os
+import time
 import cv2
+from ultralytics import YOLO
+from drawing import draw_tracks
 
-def main():
-    # Load YOLOv8 small model
-    model = YOLO("yolov8s.pt")
+# ========================
+# User-tunable parameters
+# ========================
 
-    # Only potted plant (COCO class ID 58)
-    allowed_classes = [0]
+# Camera index:
+#   0 = built-in webcam
+#   1/2 = Camo/iPhone virtual camera
+CAMERA_INDEX: int = 1
 
-    # Track seen IDs
-    seen_ids = set()
+# Model weights
+MODEL_WEIGHTS: str = "yolov8s.pt"
 
-    # Start webcam (phone camera via Camo)
-    cap = cv2.VideoCapture(1)  # Change index if needed
+# Classes to track (COCO IDs): 0=person, 2=car, 58=potted plant
+SELECTED_CLASS_IDS = [2]
 
-    print("✅ Starting Object Tracking... Press 'q' to quit.")
+# Detector thresholds and image size
+CONF_THRESHOLD: float = 0.65
+IOU_THRESHOLD: float = 0.60
+IMAGE_SIZE: int = 640
+
+# Tracker config: prefer local file, else use Ultralytics' built-in
+LOCAL_TRACKER_YAML: str = "tracker.yaml"
+TRACKER_CONFIG: str = LOCAL_TRACKER_YAML if os.path.exists(LOCAL_TRACKER_YAML) else "bytetrack.yaml"
+
+# Verbose debug prints from Ultralytics
+VERBOSE: bool = False
+
+
+def main() -> None:
+    """Run YOLOv8 + ByteTrack. Only a single, unified ID is shown (drawing handled in drawing.py)."""
+    print("Starting Object Tracking... Press 'q' to quit.")
+
+    # 1) Load detector
+    model = YOLO(MODEL_WEIGHTS)
+
+    # 2) Open camera
+    cap = cv2.VideoCapture(CAMERA_INDEX)
+    if not cap.isOpened():
+        print(f"Could not open camera index {CAMERA_INDEX}.")
+        return
+
+    # 3) ID mapping:
+    #    tid_to_unified maps raw tracker ID (TID) -> displayed unified ID (int)
+    tid_to_unified: dict[int, int] = {}
+    next_unified_id: int = 1
+
+    # Optional: keep track of which unified IDs we've already drawn once
+    # (your drawing.py can also manage “seen” coloring internally if you prefer)
+    seen_unified_ids: set[int] = set()
+
+    # FPS meter
+    last_t = time.time()
+    fps = 0.0
 
     while True:
-        ret, frame = cap.read()
-        if not ret:
+        ok, frame = cap.read()
+        if not ok:
+            print("Failed to read from camera.")
             break
 
-        # Run tracking
+        # 4) Run tracking on the current frame
         results = model.track(
             source=frame,
             persist=True,
-            tracker="bytetrack.yaml",
-            conf=0.5
+            tracker=TRACKER_CONFIG,
+            classes=SELECTED_CLASS_IDS,
+            conf=CONF_THRESHOLD,
+            iou=IOU_THRESHOLD,
+            imgsz=IMAGE_SIZE,
+            verbose=VERBOSE,
         )
 
-        annotated_frame = frame.copy()
+        # 5) Build list for drawing: [[x1, y1, x2, y2, unified_id], ...]
+        tracks_for_drawing: list[list[int]] = []
 
         for r in results:
-            if not hasattr(r, "boxes"):
+            boxes = getattr(r, "boxes", None)
+            if boxes is None or len(boxes) == 0:
                 continue
 
-            for box in r.boxes:
-                cls_id = int(box.cls[0])
-                if cls_id not in allowed_classes:
+            xyxy = boxes.xyxy.cpu().tolist()
+            tids = boxes.id.cpu().tolist() if boxes.id is not None else [None] * len(xyxy)
+
+            for (x1, y1, x2, y2), tid in zip(xyxy, tids):
+                if tid is None:
                     continue
 
-                track_id = int(box.id[0]) if box.id is not None else -1
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                conf = float(box.conf[0])
+                # Ensure integer coords
+                x1i, y1i, x2i, y2i = int(x1), int(y1), int(x2), int(y2)
 
-                # Assign colors based on new/known ID
-                if track_id not in seen_ids:
-                    color = (0, 255, 0)  # Green for new
-                    seen_ids.add(track_id)
-                else:
-                    color = (255, 0, 0)  # Blue for known
+                # Map tracker’s TID → unified ID (single ID display)
+                if tid not in tid_to_unified:
+                    tid_to_unified[tid] = next_unified_id
+                    next_unified_id += 1
 
-                label = f"ID:{track_id} {model.names[cls_id]} {conf:.2f}"
+                unified_id = tid_to_unified[tid]
+                tracks_for_drawing.append([x1i, y1i, x2i, y2i, unified_id])
 
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(annotated_frame, label, (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        # 6) Draw overlays (NOTE: pass tid_to_unified so drawing has the IDs)
+        frame = draw_tracks(frame, tracks_for_drawing, tid_to_unified)
 
-        cv2.imshow("Tracking - Potted Plants", annotated_frame)
+        # 7) FPS HUD
+        now = time.time()
+        dt = now - last_t
+        if dt > 0:
+            fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps else (1.0 / dt)
+        last_t = now
+        cv2.putText(frame, f"FPS: {fps:.1f}", (10, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        cv2.imshow("Object Tracking (single ID)", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
     cv2.destroyAllWindows()
+    print("Stopped.")
+
 
 if __name__ == "__main__":
     main()

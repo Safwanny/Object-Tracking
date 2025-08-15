@@ -1,7 +1,10 @@
-# BYTETracker default config
-track_high_thresh: 0.5
-track_low_thresh: 0.1
-new_track_thresh: 0.4
-track_buffer: 30
-match_thresh: 0.8
+# ByteTrack tuning for stickier IDs
+tracker_type: bytetrack
+track_high_thresh: 0.55     # promote confident matches
+track_low_thresh: 0.10
+new_track_thresh: 0.6      # require decent conf to spawn new tracks
+match_thresh: 0.75          # easier matching → fewer ID changes
+track_buffer: 240           # keep tracks alive ~4s at 30 FPS
 frame_rate: 30
+fuse_bbox: True
+fuse_score: True
