@@ -1,3 +1,7 @@
 ultralytics==8.3.0
 opencv-python
 numpy
+filterpy
+lapx
+scipy
+scikit-learn

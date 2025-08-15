@@ -1,7 +1,25 @@
-# BYTETracker default config
-track_high_thresh: 0.5
-track_low_thresh: 0.1
-new_track_thresh: 0.4
+tracker_type: botsort
+
+track_high_thresh: 0.55
+track_low_thresh: 0.10
+new_track_thresh: 0.60
 track_buffer: 30
-match_thresh: 0.8
+match_thresh: 0.80
 frame_rate: 30
+fuse_score: True
+
+gmc_method: orb
+lambda: 0.98
+iou_thresh: 0.30
+proximity_thresh: 0.50
+appearance_thresh: 0.25
+
+model: auto
+with_reid: True
+reid_weights: reid_models/osnet_x0_25_msmt17.pt
+nn_budget: 100
+max_age: 90
+max_iou_distance: 0.80
+max_dist: 0.20
+ema_alpha: 0.95
+mc_lambda: 0.995
